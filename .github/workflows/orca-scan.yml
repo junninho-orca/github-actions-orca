@@ -26,6 +26,8 @@ permissions:
   security-events: write
   # Needed so the PR gets a check annotation with findings.
   pull-requests: read
+  # Needed by CodeQL upload-sarif to read workflow run metadata.
+  actions: read
 
 env:
   # Project key correlates this repo to an Orca AppSec project. Create it in
