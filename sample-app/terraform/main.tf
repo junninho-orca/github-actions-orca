@@ -1,8 +1,3 @@
-############################################################
-# Sample Terraform with intentional misconfigurations for the
-# Orca IaC scan demo. Do NOT apply. For illustration only.
-############################################################
-
 terraform {
   required_version = ">= 1.5.0"
   required_providers {
@@ -17,17 +12,39 @@ provider "aws" {
   region = "us-east-1"
 }
 
-# IaC finding: S3 bucket with public-read ACL and no encryption.
+variable "db_password" {
+  description = "RDS master password"
+  type        = string
+  sensitive   = true
+}
+
+variable "allowed_ssh_cidr" {
+  description = "CIDR block allowed SSH access"
+  type        = string
+}
+
 resource "aws_s3_bucket" "demo_data" {
   bucket = "orca-demo-data-bucket"
 }
 
-resource "aws_s3_bucket_acl" "demo_data" {
+resource "aws_s3_bucket_server_side_encryption_configuration" "demo_data" {
   bucket = aws_s3_bucket.demo_data.id
-  acl    = "public-read"
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
 }
 
-# IaC finding: security group open to the world on SSH.
+resource "aws_s3_bucket_public_access_block" "demo_data" {
+  bucket                  = aws_s3_bucket.demo_data.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
 resource "aws_security_group" "web" {
   name        = "orca-demo-web"
   description = "Demo SG"
@@ -36,7 +53,7 @@ resource "aws_security_group" "web" {
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = [var.allowed_ssh_cidr]
   }
 
   egress {
@@ -47,16 +64,15 @@ resource "aws_security_group" "web" {
   }
 }
 
-# IaC finding: RDS instance with public access and no encryption at rest.
 resource "aws_db_instance" "demo" {
   identifier             = "orca-demo-db"
   engine                 = "postgres"
   instance_class         = "db.t3.micro"
   allocated_storage      = 20
   username               = "admin"
-  password               = "ChangeMe123!" # also a secrets-scan finding
-  publicly_accessible    = true
-  storage_encrypted      = false
+  password               = var.db_password
+  publicly_accessible    = false
+  storage_encrypted      = true
   skip_final_snapshot    = true
   vpc_security_group_ids = [aws_security_group.web.id]
 }
