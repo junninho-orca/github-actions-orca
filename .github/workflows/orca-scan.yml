@@ -54,13 +54,13 @@ jobs:
           path: .
           # SARIF lets GitHub render findings in the Security tab.
           format: sarif
-          output: orca-sast.sarif
+          output: orca-sast-results/
 
       - name: Upload SAST SARIF
         if: always()
         uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: orca-sast.sarif
+          sarif_file: orca-sast-results/
           category: orca-sast
 
   # -------------------------------------------------------------------
@@ -80,13 +80,13 @@ jobs:
           project_key: ${{ env.ORCA_PROJECT_KEY }}
           path: .
           format: sarif
-          output: orca-sca.sarif
+          output: orca-sca-results/
 
       - name: Upload SCA SARIF
         if: always()
         uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: orca-sca.sarif
+          sarif_file: orca-sca-results/
           category: orca-sca
 
   # -------------------------------------------------------------------
@@ -106,13 +106,13 @@ jobs:
           project_key: ${{ env.ORCA_PROJECT_KEY }}
           path: .
           format: sarif
-          output: orca-iac.sarif
+          output: orca-iac-results/
 
       - name: Upload IaC SARIF
         if: always()
         uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: orca-iac.sarif
+          sarif_file: orca-iac-results/
           category: orca-iac
 
   # -------------------------------------------------------------------
@@ -135,13 +135,13 @@ jobs:
           project_key: ${{ env.ORCA_PROJECT_KEY }}
           path: .
           format: sarif
-          output: orca-secrets.sarif
+          output: orca-secrets-results/
 
       - name: Upload Secrets SARIF
         if: always()
         uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: orca-secrets.sarif
+          sarif_file: orca-secrets-results/
           category: orca-secrets
 
   # -------------------------------------------------------------------
