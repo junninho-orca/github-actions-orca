@@ -1,0 +1,202 @@
+name: Orca Security Shift-Left
+
+# Shift-left security scans for every PR and every push to main.
+# Covers: SAST, SCA, IaC, Secrets, and the built container image.
+#
+# Gating model:
+#   The "fail on High/Critical" gate is enforced by Orca's server-side policy,
+#   not by ad-hoc CLI flags. Configure your project policy in Orca to fail on
+#   High+Critical. The dedicated actions and the CLI exit with code 3 when a
+#   policy decision is "fail", which naturally fails the job.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Cancel older runs of the same ref to keep PR feedback snappy.
+concurrency:
+  group: orca-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # Needed so we can upload SARIF to GitHub code scanning.
+  security-events: write
+  # Needed so the PR gets a check annotation with findings.
+  pull-requests: read
+
+env:
+  # Project key correlates this repo to an Orca AppSec project. Create it in
+  # the Orca platform (AppSec -> Management -> Projects). Safe to commit; it
+  # is not a secret on its own.
+  ORCA_PROJECT_KEY: demo-shiftleft-project
+  IMAGE_NAME: orca-demo-app
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+  # -------------------------------------------------------------------
+  # SAST: static analysis of source code.
+  # -------------------------------------------------------------------
+  sast:
+    name: SAST
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Orca SAST scan
+        uses: orcasecurity/orca-sast-action@v1
+        with:
+          api_token: ${{ secrets.ORCA_SECURITY_API_TOKEN }}
+          project_key: ${{ env.ORCA_PROJECT_KEY }}
+          path: .
+          # SARIF lets GitHub render findings in the Security tab.
+          format: sarif
+          output: orca-sast.sarif
+
+      - name: Upload SAST SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: orca-sast.sarif
+          category: orca-sast
+
+  # -------------------------------------------------------------------
+  # SCA: dependency vulns and license issues.
+  # -------------------------------------------------------------------
+  sca:
+    name: SCA
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Orca SCA scan
+        uses: orcasecurity/orca-sca-action@v1
+        with:
+          api_token: ${{ secrets.ORCA_SECURITY_API_TOKEN }}
+          project_key: ${{ env.ORCA_PROJECT_KEY }}
+          path: .
+          format: sarif
+          output: orca-sca.sarif
+
+      - name: Upload SCA SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: orca-sca.sarif
+          category: orca-sca
+
+  # -------------------------------------------------------------------
+  # IaC: Terraform / CloudFormation / Kubernetes / Helm misconfigs.
+  # -------------------------------------------------------------------
+  iac:
+    name: IaC
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Orca IaC scan
+        uses: orcasecurity/orca-iac-action@v1
+        with:
+          api_token: ${{ secrets.ORCA_SECURITY_API_TOKEN }}
+          project_key: ${{ env.ORCA_PROJECT_KEY }}
+          path: .
+          format: sarif
+          output: orca-iac.sarif
+
+      - name: Upload IaC SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: orca-iac.sarif
+          category: orca-iac
+
+  # -------------------------------------------------------------------
+  # Secrets: hardcoded tokens, keys, credentials.
+  # -------------------------------------------------------------------
+  secrets:
+    name: Secrets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Full history so the scan can see rotated credentials across commits.
+          fetch-depth: 0
+
+      - name: Orca Secrets scan
+        uses: orcasecurity/orca-secrets-action@v1
+        with:
+          api_token: ${{ secrets.ORCA_SECURITY_API_TOKEN }}
+          project_key: ${{ env.ORCA_PROJECT_KEY }}
+          path: .
+          format: sarif
+          output: orca-secrets.sarif
+
+      - name: Upload Secrets SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: orca-secrets.sarif
+          category: orca-secrets
+
+  # -------------------------------------------------------------------
+  # Container image: build then scan for OS + lang vulns, secrets-in-layers, misconfigs.
+  # Dedicated action does not exist for image scan, so we use orca-cli directly.
+  # -------------------------------------------------------------------
+  image:
+    name: Container Image
+    runs-on: ubuntu-latest
+    needs: [sca]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build image
+        working-directory: sample-app
+        run: docker build -t "$IMAGE_NAME:$IMAGE_TAG" .
+
+      - name: Install orca-cli
+        run: |
+          set -euo pipefail
+          curl -sfL 'https://raw.githubusercontent.com/orcasecurity/orca-cli/main/install.sh' \
+            | bash -s -- -b /usr/local/bin
+          orca-cli --version
+
+      - name: Scan image
+        env:
+          ORCA_SECURITY_API_TOKEN: ${{ secrets.ORCA_SECURITY_API_TOKEN }}
+        run: |
+          orca-cli --project-key "$ORCA_PROJECT_KEY" image scan \
+            "$IMAGE_NAME:$IMAGE_TAG" \
+            --format sarif \
+            --output orca-image.sarif
+
+      - name: Upload Image SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: orca-image.sarif
+          category: orca-image
+
+  # -------------------------------------------------------------------
+  # Required check: one job to rule them all. Branch protection points here.
+  # -------------------------------------------------------------------
+  orca-gate:
+    name: Orca Gate
+    runs-on: ubuntu-latest
+    needs: [sast, sca, iac, secrets, image]
+    if: always()
+    steps:
+      - name: Evaluate
+        run: |
+          set -e
+          results='${{ toJson(needs) }}'
+          echo "Scan results: $results"
+          echo "$results" | grep -q '"result": "failure"' \
+            && { echo "::error::Orca policy decision: FAIL. See Security tab for findings."; exit 1; } \
+            || echo "Orca policy decision: PASS"

@@ -1,0 +1,7 @@
+# Intentionally old / vulnerable versions for SCA demo.
+# Fix path: bump to the latest patched minor in each case.
+Flask==1.0.2
+Jinja2==2.10
+Werkzeug==0.14.1
+requests==2.19.1
+PyYAML==5.1

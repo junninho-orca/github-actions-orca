@@ -1,0 +1,12 @@
+.DS_Store
+.env
+.env.local
+*.log
+__pycache__/
+*.pyc
+.venv/
+venv/
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.sarif
