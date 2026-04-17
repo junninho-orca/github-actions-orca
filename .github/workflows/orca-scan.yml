@@ -47,7 +47,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Orca SAST scan
-        uses: orcasecurity/orca-sast-action@v1
+        uses: orcasecurity/shiftleft-sast-action@v1
         with:
           api_token: ${{ secrets.ORCA_SECURITY_API_TOKEN }}
           project_key: ${{ env.ORCA_PROJECT_KEY }}
@@ -74,7 +74,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Orca SCA scan
-        uses: orcasecurity/orca-sca-action@v1
+        uses: orcasecurity/shiftleft-fs-action@v1
         with:
           api_token: ${{ secrets.ORCA_SECURITY_API_TOKEN }}
           project_key: ${{ env.ORCA_PROJECT_KEY }}
@@ -100,7 +100,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Orca IaC scan
-        uses: orcasecurity/orca-iac-action@v1
+        uses: orcasecurity/shiftleft-iac-action@v1
         with:
           api_token: ${{ secrets.ORCA_SECURITY_API_TOKEN }}
           project_key: ${{ env.ORCA_PROJECT_KEY }}
@@ -129,7 +129,7 @@ jobs:
           fetch-depth: 0
 
       - name: Orca Secrets scan
-        uses: orcasecurity/orca-secrets-action@v1
+        uses: orcasecurity/shiftleft-secrets-action@v1
         with:
           api_token: ${{ secrets.ORCA_SECURITY_API_TOKEN }}
           project_key: ${{ env.ORCA_PROJECT_KEY }}
