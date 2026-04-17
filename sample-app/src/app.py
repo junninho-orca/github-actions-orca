@@ -17,8 +17,8 @@ from flask import Flask, request
 app = Flask(__name__)
 
 # Secrets finding: hardcoded AWS-looking key.
-AWS_ACCESS_KEY_ID = "AKIAIOSFODNN7EXAMPLE"
-AWS_SECRET_ACCESS_KEY = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+AWS_ACCESS_KEY_ID = "AKIAI3X7MZPQ2RS4TUVW"
+AWS_SECRET_ACCESS_KEY = "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"
 
 
 @app.route("/user")
