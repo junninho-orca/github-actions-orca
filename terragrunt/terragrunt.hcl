@@ -17,8 +17,9 @@ remote_state {
   backend = "gcs"
 
   config = {
-    bucket = "orca-demo-tfstate-${local.project_id}"
-    prefix = "${path_relative_to_include()}/terraform.tfstate"
+    bucket  = "orca-demo-tfstate-${local.project_id}"
+    prefix  = "${path_relative_to_include()}/terraform.tfstate"
+    project = local.project_id
 
     # MISCONFIGURATION: no customer-managed encryption key for state bucket
     # encryption_key = ""  # omitted intentionally
