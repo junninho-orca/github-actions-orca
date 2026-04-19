@@ -209,12 +209,33 @@ jobs:
               --no-color || true
           done
 
-      - name: Upload Terragrunt IaC SARIF
-        if: always() && hashFiles('orca-iac-terragrunt-results/*.sarif') != ''
+      - name: Upload Terragrunt IaC SARIF (networking)
+        if: always() && hashFiles('orca-iac-terragrunt-results/networking.sarif') != ''
         uses: github/codeql-action/upload-sarif@v4
         with:
-          sarif_file: orca-iac-terragrunt-results/
-          category: orca-iac-terragrunt
+          sarif_file: orca-iac-terragrunt-results/networking.sarif
+          category: orca-iac-terragrunt-networking
+
+      - name: Upload Terragrunt IaC SARIF (storage)
+        if: always() && hashFiles('orca-iac-terragrunt-results/storage.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: orca-iac-terragrunt-results/storage.sarif
+          category: orca-iac-terragrunt-storage
+
+      - name: Upload Terragrunt IaC SARIF (database)
+        if: always() && hashFiles('orca-iac-terragrunt-results/database.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: orca-iac-terragrunt-results/database.sarif
+          category: orca-iac-terragrunt-database
+
+      - name: Upload Terragrunt IaC SARIF (iam)
+        if: always() && hashFiles('orca-iac-terragrunt-results/iam.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: orca-iac-terragrunt-results/iam.sarif
+          category: orca-iac-terragrunt-iam
 
   # -------------------------------------------------------------------
   # Secrets: hardcoded tokens, keys, credentials.
