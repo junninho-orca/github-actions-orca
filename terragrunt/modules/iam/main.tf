@@ -49,7 +49,9 @@ resource "google_service_account_key" "app" {
 # will appear in Terraform state and CI logs
 output "service_account_key" {
   value     = google_service_account_key.app.private_key
-  sensitive = false  # MISCONFIGURATION: should be sensitive = true
+  sensitive = true
+  # Key is still stored in plaintext in Terraform state — the Orca finding
+  # is the google_service_account_key resource itself (long-lived credential).
 }
 
 # MISCONFIGURATION: allows any identity in the project to impersonate this SA
