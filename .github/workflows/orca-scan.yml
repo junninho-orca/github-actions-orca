@@ -167,8 +167,6 @@ jobs:
       - name: Generate Terragrunt plan files
         env:
           TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
-          # Skip backend init so no GCS state bucket is required for plan generation
-          TF_CLI_ARGS_init: "-backend=false"
         run: |
           set -euo pipefail
           mkdir -p terragrunt-plans

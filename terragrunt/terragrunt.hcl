@@ -13,27 +13,6 @@ locals {
   region     = local.region_vars.locals.gcp_region
 }
 
-# Use generate instead of remote_state so Terragrunt writes the backend config
-# file without trying to create or validate a GCS bucket. This lets CI generate
-# terraform plan files with TF_CLI_ARGS_init="-backend=false" and no storage
-# permissions — while real deployments still get a proper GCS backend.
-generate "backend" {
-  path      = "backend.tf"
-  if_exists = "overwrite_terragrunt"
-  contents  = <<EOF
-terraform {
-  backend "gcs" {
-    bucket  = "orca-demo-tfstate-${local.project_id}"
-    prefix  = "${path_relative_to_include()}/terraform.tfstate"
-    project = "${local.project_id}"
-
-    # MISCONFIGURATION: no customer-managed encryption key
-    # MISCONFIGURATION: no uniform bucket-level access
-  }
-}
-EOF
-}
-
 generate "provider" {
   path      = "provider.tf"
   if_exists = "overwrite_terragrunt"
