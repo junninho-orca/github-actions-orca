@@ -8,11 +8,18 @@ This repo also ships a small `sample-app/` with intentional issues so the pipeli
 
 - `.github/workflows/orca-scan.yml` — one workflow, five scan jobs, a final required gate
 - `sample-app/` — Python + Terraform + Dockerfile with planted issues across every scan type
+- `terragrunt/` — Terragrunt project (GCP, modules + live/dev) with IaC misconfigs across networking, storage, Cloud SQL, and IAM. The `iac-terragrunt` workflow job authenticates to GCP via Workload Identity Federation, runs `terragrunt plan` per module to generate real JSON plan files, then scans them with orca-cli.
 - `.gitignore` — keeps Terraform state and SARIF artifacts out of commits
 
 ## Prerequisites
 
-1. **Orca tenant** with AppSec enabled
+1. **GCP project** for the Terragrunt demo (the `iac-terragrunt` job runs real `terragrunt plan` using short-lived credentials)
+   - Create a service account with `roles/viewer` + `roles/iam.securityReviewer` — read-only is enough for plan generation
+   - Download a JSON key for that service account
+   - Add two GitHub secrets: `GCP_SERVICE_ACCOUNT_KEY` (the full JSON key contents) and `GCP_PROJECT_ID`
+   - Update `terragrunt/live/project.hcl` with your project ID (the workflow patches it at runtime, but keep the file in sync for local runs)
+
+2. **Orca tenant** with AppSec enabled
 2. **API token** with the *Shift Left User* role
    - Orca UI: **AppSec → Management → How to initiate a scan → API Token → Create Token**
    - Enable **Service Token** so it survives past your user session
@@ -116,6 +123,11 @@ The `sample-app/` directory is designed to produce findings across every categor
 | IaC | `terraform/main.tf` | Public-read S3 ACL, no encryption |
 | IaC | `terraform/main.tf` | Security group `0.0.0.0/0` on port 22 |
 | IaC | `terraform/main.tf` | RDS publicly accessible, unencrypted at rest |
+| IaC | `terragrunt/modules/networking/main.tf` | Firewall rules open SSH/RDP/all to `0.0.0.0/0`; VPC flow logs disabled; compute instance with public IP, serial port on, no Shielded VM, cloud-platform scope |
+| IaC | `terragrunt/modules/storage/main.tf` | GCS bucket with `allUsers` read/write; uniform bucket-level access off; public access prevention inherited; no versioning; no logging |
+| IaC | `terragrunt/modules/database/main.tf` | Cloud SQL publicly accessible; SSL not required; backups disabled; `0.0.0.0/0` authorized network; deletion protection off |
+| IaC | `terragrunt/modules/iam/main.tf` | `roles/owner` granted to `allAuthenticatedUsers`; primitive Editor role on SA; downloadable SA key; `sensitive=false` on key output |
+| Secrets | `terragrunt/modules/database/main.tf` | Hardcoded Cloud SQL password |
 | Image | `Dockerfile` | Outdated base image, runs as root |
 
 Push this as a PR. You should see the five checks run, a handful of annotations appear inline on the diff, and the `Orca Gate` check fail. Flip any one finding (for example, pin `Jinja2>=3.1.4`) and re-push — the corresponding annotation clears and the gate shrinks toward green.

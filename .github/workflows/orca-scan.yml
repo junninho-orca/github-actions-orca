@@ -118,6 +118,107 @@ jobs:
           category: orca-iac
 
   # -------------------------------------------------------------------
+  # IaC (Terragrunt): authenticate to GCP with short-lived credentials via
+  # Workload Identity Federation, generate a real terraform plan per module,
+  # then scan each plan file with orca-cli.
+  #
+  # Required secrets:
+  #   GCP_WORKLOAD_IDENTITY_PROVIDER  — projects/<n>/locations/global/workloadIdentityPools/<pool>/providers/<provider>
+  #   GCP_SERVICE_ACCOUNT             — <sa-name>@<project>.iam.gserviceaccount.com
+  #   GCP_PROJECT_ID                  — your GCP project ID
+  #
+  # The service account needs roles/viewer + roles/iam.securityReviewer
+  # (read-only) so plan generation works without modifying real infrastructure.
+  # -------------------------------------------------------------------
+  iac-terragrunt:
+    name: IaC (Terragrunt)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.0"
+          terraform_wrapper: false
+
+      - name: Set up Terragrunt
+        run: |
+          set -euo pipefail
+          TG_VERSION="0.55.21"
+          curl -sL "https://github.com/gruntwork-io/terragrunt/releases/download/v${TG_VERSION}/terragrunt_linux_amd64" \
+            -o /usr/local/bin/terragrunt
+          chmod +x /usr/local/bin/terragrunt
+          terragrunt --version
+
+      - name: Install orca-cli
+        run: |
+          set -euo pipefail
+          curl -sfL 'https://raw.githubusercontent.com/orcasecurity/orca-cli/main/install.sh' \
+            | bash -s -- -b /usr/local/bin
+          orca-cli --version
+
+      - name: Generate Terragrunt plan files
+        env:
+          TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
+          # Skip backend init so no GCS state bucket is required for plan generation
+          TF_CLI_ARGS_init: "-backend=false"
+        run: |
+          set -euo pipefail
+          mkdir -p terragrunt-plans
+
+          for module in networking storage database iam; do
+            echo "--- Generating plan: $module ---"
+            dir="terragrunt/live/dev/$module"
+
+            # Patch project.hcl with the real project ID for this run
+            sed -i "s/your-gcp-project-id/${{ secrets.GCP_PROJECT_ID }}/" \
+              terragrunt/live/project.hcl
+
+            terragrunt plan \
+              --terragrunt-working-dir "$dir" \
+              --terragrunt-non-interactive \
+              -out="${module}.tfplan" 2>&1
+
+            terragrunt show \
+              --terragrunt-working-dir "$dir" \
+              -json "${module}.tfplan" \
+              > "terragrunt-plans/${module}.tfplan.json"
+
+            echo "Plan generated: terragrunt-plans/${module}.tfplan.json"
+          done
+
+      - name: Scan Terragrunt plan files with Orca
+        env:
+          ORCA_SECURITY_API_TOKEN: ${{ secrets.ORCA_SECURITY_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p orca-iac-terragrunt-results
+
+          for plan in terragrunt-plans/*.tfplan.json; do
+            module=$(basename "$plan" .tfplan.json)
+            echo "Scanning $module..."
+            orca-cli --project-key "$ORCA_PROJECT_KEY" iac scan \
+              --path "$plan" \
+              --format sarif \
+              --output "orca-iac-terragrunt-results/${module}.sarif" \
+              --no-color || true
+          done
+
+      - name: Upload Terragrunt IaC SARIF
+        if: always() && hashFiles('orca-iac-terragrunt-results/*.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: orca-iac-terragrunt-results/
+          category: orca-iac-terragrunt
+
+  # -------------------------------------------------------------------
   # Secrets: hardcoded tokens, keys, credentials.
   # -------------------------------------------------------------------
   secrets:
@@ -190,7 +291,7 @@ jobs:
   orca-gate:
     name: Orca Gate
     runs-on: ubuntu-latest
-    needs: [sast, sca, iac, secrets, image]
+    needs: [sast, sca, iac, iac-terragrunt, secrets, image]
     if: always()
     steps:
       - name: Evaluate
