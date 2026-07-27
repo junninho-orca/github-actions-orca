@@ -1,0 +1,29 @@
+# ============================================================================
+# MALICIOUS PACKAGE DEMO MANIFEST — SCANNED, NEVER INSTALLED.
+#
+# This file exists only so Orca's SCA scan has a malicious package to flag.
+# NOTHING in this repo installs from it:
+#   - sample-app/Dockerfile copies `requirements.txt` and `src/` only, so this
+#     directory never reaches the image.
+#   - sample-app/.dockerignore excludes this directory from the build context
+#     outright, so even a future `COPY . .` cannot pull it in.
+#
+# DO NOT `pip install -r` this file, and do not merge these lines into
+# sample-app/requirements.txt. Both packages below were removed from PyPI, so
+# pip cannot resolve them today — but that is a backstop, not the reason it is
+# safe. The reason it is safe is that nothing points an installer at this file.
+#
+# Both entries are catalogued in OSV.dev, which per Orca's docs is the primary
+# upstream feed for the Malicious Packages knowledge base — so these are the
+# same records the scan matches against, not invented names.
+# ============================================================================
+
+# MAL-2023-1574 — typosquat of `aiohttp`. Part of the 2023 campaign that pushed
+# 900+ malicious packages to PyPI to hijack clipboard crypto wallet addresses.
+# All versions are malicious, so this is intentionally left unpinned.
+aaiohttp
+
+# MAL-2026-10760 — typosquat of `absl-py`. Exfiltrates host information on
+# install or import and has no other purpose. Pinned to the exact version the
+# advisory flags.
+abseil-py==0.1.0

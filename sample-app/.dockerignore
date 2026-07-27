@@ -1,0 +1,8 @@
+# The image needs `requirements.txt` and `src/` and nothing else. Excluding the
+# rest here means the malicious-package demo manifest is not merely uncopied —
+# it never enters the build context, so a future `COPY . .` cannot pull it in.
+malicious-packages-demo/
+terraform/
+.DS_Store
+__pycache__/
+*.pyc
