@@ -10,3 +10,8 @@ venv/
 *.tfstate
 *.tfstate.backup
 *.sarif
+# Terragrunt / Atlantis plan artifacts. orca-plan.json is a rendered plan and
+# can contain sensitive input values in plaintext — never commit one.
+.terragrunt-cache/
+*.tfplan
+orca-plan.json

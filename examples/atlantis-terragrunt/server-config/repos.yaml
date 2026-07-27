@@ -1,0 +1,79 @@
+############################################################
+# Server-side Atlantis config — the version you actually enforce with.
+#
+# Passed to the Atlantis server with --repo-config=/etc/atlantis/repos.yaml
+# (env: ATLANTIS_REPO_CONFIG). Unlike a repo-level atlantis.yaml, this file
+# lives with the Atlantis deployment, so a pull request cannot edit it.
+#
+# WHY THIS MATTERS
+#   With `allow_custom_workflows: true`, any PR author can redefine the
+#   workflow in the repo's atlantis.yaml — dropping the Orca step, or adding a
+#   step that prints $ORCA_SECURITY_API_TOKEN into a PR comment. A security
+#   gate that the person being gated can rewrite is not a gate. Defining the
+#   workflow here and refusing repo-level overrides is what makes it one.
+############################################################
+
+repos:
+  - id: /.*/
+
+    # Every project uses the gated workflow, whether or not the repo asks for it.
+    workflow: terragrunt-orca
+
+    # Repos may declare their own projects and adjust apply gating, but may not
+    # choose a different workflow or define their own.
+    allowed_overrides: [apply_requirements]
+    allow_custom_workflows: false
+
+    apply_requirements: [approved, mergeable]
+
+    # Optional: restrict who can trigger applies.
+    # allowed_workflows: [terragrunt-orca]
+
+workflows:
+  terragrunt-orca:
+    plan:
+      steps:
+        - env:
+            name: TG_TF_PATH
+            command: 'echo "${ATLANTIS_TERRAFORM_DISTRIBUTION}${ATLANTIS_TERRAFORM_VERSION}"'
+        - env:
+            name: TF_IN_AUTOMATION
+            value: "true"
+        - env:
+            name: ORCA_PROJECT_KEY
+            value: "demo-atlantis-terragrunt"
+
+        - run:
+            command: terragrunt init -input=false
+
+        - run:
+            command: terragrunt plan -input=false -out=$PLANFILE
+            output: strip_refreshing
+
+        # See atlantis.yaml for the full commentary on why this scans the
+        # rendered plan and why the cleanup uses a trap.
+        - run:
+            shell: bash
+            shellArgs: ["-c"]
+            command: |
+              set -euo pipefail
+              trap 'rm -f orca-plan.json' EXIT
+
+              terragrunt show -json "$PLANFILE" > orca-plan.json
+
+              orca-cli \
+                --project-key "$ORCA_PROJECT_KEY" \
+                --display-name "atlantis/${PROJECT_NAME}@${HEAD_COMMIT}" \
+                iac scan \
+                --path orca-plan.json
+
+    apply:
+      steps:
+        - env:
+            name: TG_TF_PATH
+            command: 'echo "${ATLANTIS_TERRAFORM_DISTRIBUTION}${ATLANTIS_TERRAFORM_VERSION}"'
+        - env:
+            name: TF_IN_AUTOMATION
+            value: "true"
+        - run:
+            command: terragrunt apply $PLANFILE

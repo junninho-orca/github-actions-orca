@@ -1,0 +1,141 @@
+############################################################
+# Repo-level Atlantis config with an Orca IaC gate.
+#
+# WHERE THIS FILE GOES
+#   Atlantis only reads `atlantis.yaml` from the REPO ROOT. Copy this there.
+#   The `dir:` values below assume the terragrunt tree also sits at the repo
+#   root. In this example repo it lives under examples/atlantis-terragrunt/, so
+#   if you point Atlantis straight at this repo, prefix each `dir:` with
+#   `examples/atlantis-terragrunt/`.
+#
+# READ THIS BEFORE USING IT AS A GATE
+#   A workflow defined here is defined in the repo, which means anyone who can
+#   open a pull request can edit it — including deleting the Orca step or
+#   echoing $ORCA_SECURITY_API_TOKEN. That is fine for a demo and unacceptable
+#   as a control. For real enforcement, move the `workflows:` block to the
+#   server-side repos.yaml (see server-config/repos.yaml) and set
+#   `allow_custom_workflows: false` there.
+############################################################
+
+version: 3
+
+# Plans run concurrently; applies are serialised so two units can't race on
+# shared state.
+parallel_plan: true
+parallel_apply: false
+automerge: false
+
+projects:
+  # ---- dev: control case, should pass the gate -----------------------------
+  - name: dev-s3-data
+    dir: live/dev/s3-data
+    workflow: terragrunt-orca
+    autoplan:
+      enabled: true
+      when_modified:
+        - "*.hcl"
+        - "../env.hcl"
+        - "../../account.hcl"
+        - "../../../terragrunt.hcl"
+        - "../../../modules/s3-bucket/**/*.tf"
+    apply_requirements: [approved, mergeable]
+
+  # ---- prod: should fail the gate ------------------------------------------
+  - name: prod-s3-data
+    dir: live/prod/s3-data
+    workflow: terragrunt-orca
+    autoplan:
+      enabled: true
+      when_modified:
+        - "*.hcl"
+        - "../env.hcl"
+        - "../../account.hcl"
+        - "../../../terragrunt.hcl"
+        - "../../../modules/s3-bucket/**/*.tf"
+    apply_requirements: [approved, mergeable]
+
+  - name: prod-rds
+    dir: live/prod/rds
+    workflow: terragrunt-orca
+    autoplan:
+      enabled: true
+      when_modified:
+        - "*.hcl"
+        - "../env.hcl"
+        - "../../account.hcl"
+        - "../../../terragrunt.hcl"
+        - "../../../modules/rds/**/*.tf"
+    apply_requirements: [approved, mergeable]
+
+workflows:
+  terragrunt-orca:
+    plan:
+      steps:
+        # Point Terragrunt at the Terraform binary Atlantis resolved for this
+        # project, rather than whatever is first on PATH.
+        - env:
+            name: TG_TF_PATH
+            command: 'echo "${ATLANTIS_TERRAFORM_DISTRIBUTION}${ATLANTIS_TERRAFORM_VERSION}"'
+        - env:
+            name: TF_IN_AUTOMATION
+            value: "true"
+        # Which Orca AppSec project these findings are filed under. The API
+        # token is deliberately NOT set here — see the note at the top of this
+        # file. It comes from the Atlantis server's environment.
+        - env:
+            name: ORCA_PROJECT_KEY
+            value: "demo-atlantis-terragrunt"
+
+        - run:
+            command: terragrunt init -input=false
+
+        - run:
+            command: terragrunt plan -input=false -out=$PLANFILE
+            output: strip_refreshing
+
+        # ------------------------------------------------------------------
+        # The Orca gate.
+        #
+        # It scans the RENDERED PLAN, not the .hcl or .tf files. A terragrunt.hcl
+        # contains no resources — it names a module and a set of inputs — so
+        # scanning source files here would miss the interesting misconfigs
+        # entirely. `terragrunt show -json` produces the merged, fully-resolved
+        # resource set, which Orca reads as a first-class IaC platform.
+        #
+        # The plan JSON can contain secrets in plaintext (Terraform writes
+        # sensitive input values into it), so it is written inside the project
+        # dir and removed on the way out — including when the scan fails, which
+        # is why this is one shell step with a trap rather than three steps.
+        #
+        # orca-cli exits 3 when the policy decision is "fail". Atlantis stops a
+        # workflow on any non-zero exit, so a failing scan means no plan output,
+        # which means `atlantis apply` has nothing to apply. That is the gate.
+        # ------------------------------------------------------------------
+        - run:
+            shell: bash
+            shellArgs: ["-c"]
+            command: |
+              set -euo pipefail
+              trap 'rm -f orca-plan.json' EXIT
+
+              terragrunt show -json "$PLANFILE" > orca-plan.json
+
+              orca-cli \
+                --project-key "$ORCA_PROJECT_KEY" \
+                --display-name "atlantis/${PROJECT_NAME}@${HEAD_COMMIT}" \
+                iac scan \
+                --path orca-plan.json
+
+    apply:
+      steps:
+        - env:
+            name: TG_TF_PATH
+            command: 'echo "${ATLANTIS_TERRAFORM_DISTRIBUTION}${ATLANTIS_TERRAFORM_VERSION}"'
+        - env:
+            name: TF_IN_AUTOMATION
+            value: "true"
+        # No scan here. The plan phase already gated it, and apply consumes the
+        # plan file that phase produced — if the scan failed there is no plan to
+        # apply. Re-scanning would only slow applies down.
+        - run:
+            command: terragrunt apply $PLANFILE

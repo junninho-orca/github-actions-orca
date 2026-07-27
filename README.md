@@ -9,6 +9,7 @@ This repo also ships a small `sample-app/` with intentional issues so the pipeli
 - `.github/workflows/orca-scan.yml` — one workflow, five scan jobs, a final required gate
 - `sample-app/` — Python + Terraform + Dockerfile with planted issues across every scan type
 - `.gitignore` — keeps Terraform state and SARIF artifacts out of commits
+- `examples/atlantis-terragrunt/` — the same IaC gate for customers who run Atlantis with Terragrunt instead of GitHub Actions
 
 ## Prerequisites
 
@@ -119,6 +120,10 @@ The `sample-app/` directory is designed to produce findings across every categor
 | Image | `Dockerfile` | Outdated base image, runs as root |
 
 Push this as a PR. You should see the five checks run, a handful of annotations appear inline on the diff, and the `Orca Gate` check fail. Flip any one finding (for example, pin `Jinja2>=3.1.4`) and re-push — the corresponding annotation clears and the gate shrinks toward green.
+
+## Other CI systems
+
+[`examples/atlantis-terragrunt/`](examples/atlantis-terragrunt/) covers Atlantis with Terragrunt, where the interesting difference isn't the CI system — it's *what* gets scanned. A `terragrunt.hcl` holds a module reference and a set of inputs, not resources, so scanning source files misses misconfigurations that only exist once Terragrunt merges the two. That example scans the rendered plan JSON instead, and gates `apply` on the result.
 
 ## Customizing for a customer
 
