@@ -123,7 +123,10 @@ Push this as a PR. You should see the five checks run, a handful of annotations 
 
 ## Other CI systems
 
-[`examples/atlantis-terragrunt/`](examples/atlantis-terragrunt/) covers Atlantis with Terragrunt, where the interesting difference isn't the CI system — it's *what* gets scanned. A `terragrunt.hcl` holds a module reference and a set of inputs, not resources, so scanning source files misses misconfigurations that only exist once Terragrunt merges the two. That example scans the rendered plan JSON instead, and gates `apply` on the result.
+[`examples/atlantis-terragrunt/`](examples/atlantis-terragrunt/) covers Atlantis with Terragrunt. Two things differ from this workflow beyond the CI system:
+
+- **What gets scanned.** A `terragrunt.hcl` holds a module reference and a set of inputs, not resources, so scanning source files misses misconfigurations that only exist once Terragrunt merges the two. That example scans the rendered plan JSON instead.
+- **Where the gate sits.** Here, the gate is the merge — branch protection blocks a PR until `Orca Gate` passes. In Atlantis, `atlantis apply` runs *before* the merge, so merge-time gating is too late to stop a deploy. That example uses Atlantis's `policy_check` phase and the non-overridable `policies_passed` apply requirement instead.
 
 ## Customizing for a customer
 

@@ -5,12 +5,18 @@
 # (env: ATLANTIS_REPO_CONFIG). Unlike a repo-level atlantis.yaml, this file
 # lives with the Atlantis deployment, so a pull request cannot edit it.
 #
-# WHY THIS MATTERS
+# REQUIRED SERVER FLAG
+#   --enable-policy-checks  (env: ATLANTIS_ENABLE_POLICY_CHECKS=true)
+#
+#   Without it the policy_check phase never runs and `policies_passed` is never
+#   added to apply requirements — the scan becomes advisory output with no
+#   enforcement behind it.
+#
+# WHY THE WORKFLOW LIVES HERE
 #   With `allow_custom_workflows: true`, any PR author can redefine the
 #   workflow in the repo's atlantis.yaml — dropping the Orca step, or adding a
 #   step that prints $ORCA_SECURITY_API_TOKEN into a PR comment. A security
-#   gate that the person being gated can rewrite is not a gate. Defining the
-#   workflow here and refusing repo-level overrides is what makes it one.
+#   gate that the person being gated can rewrite is not a gate.
 ############################################################
 
 repos:
@@ -19,15 +25,58 @@ repos:
     # Every project uses the gated workflow, whether or not the repo asks for it.
     workflow: terragrunt-orca
 
-    # Repos may declare their own projects and adjust apply gating, but may not
-    # choose a different workflow or define their own.
+    # Repos may declare their own projects and tighten apply gating, but may not
+    # choose a different workflow, define their own, or disable policy checks.
     allowed_overrides: [apply_requirements]
     allow_custom_workflows: false
 
+    # Run the policy_check phase for this repo. Requires the server flag above.
+    policy_check: true
+
+    # Tells Atlantis the policy_check step is not Conftest, so it does not try
+    # to interpret orca-cli's output as Conftest results.
+    custom_policy_check: true
+
+    # `policies_passed` is appended automatically and is non-overridable, so it
+    # is deliberately not listed here.
     apply_requirements: [approved, mergeable]
 
-    # Optional: restrict who can trigger applies.
-    # allowed_workflows: [terragrunt-orca]
+# ---------------------------------------------------------------------------
+# Policy owners and sets.
+#
+# The `policy_sets` list is required by schema whenever a `policies:` block is
+# present ("cannot be empty; Declare policies that you would like to enforce").
+# Because `custom_policy_check: true` is set above and the policy_check steps
+# are fully overridden, Conftest never actually runs and the rego in that
+# directory is never evaluated — it exists to satisfy validation. The real
+# policy decision is Orca's, server-side, as in every other example in this
+# repo.
+#
+# What this block genuinely buys you is `owners`: it enables
+# `atlantis approve_policies` as an owner-gated, per-PR, auditable override.
+# Without it there is no bypass path at all short of editing this file, which
+# is stricter but leaves you no trail when a real exception is needed.
+# ---------------------------------------------------------------------------
+policies:
+  owners:
+    # Replace with your security reviewers. Teams are also supported.
+    users:
+      - your-security-lead
+    # teams:
+    #   - cloud-security
+
+  # Require two owner approvals to override a failed scan.
+  approve_count: 2
+
+  # Re-plan discards prior policy approvals by default, so an override cannot
+  # silently carry across a force-push. Set to true only if you want approvals
+  # to persist across plans.
+  sticky_policy_approvals: false
+
+  policy_sets:
+    - name: orca-iac-placeholder
+      path: /etc/atlantis/policies/orca-iac-placeholder
+      source: local
 
 workflows:
   terragrunt-orca:
@@ -39,9 +88,6 @@ workflows:
         - env:
             name: TF_IN_AUTOMATION
             value: "true"
-        - env:
-            name: ORCA_PROJECT_KEY
-            value: "demo-atlantis-terragrunt"
 
         - run:
             command: terragrunt init -input=false
@@ -50,8 +96,22 @@ workflows:
             command: terragrunt plan -input=false -out=$PLANFILE
             output: strip_refreshing
 
-        # See atlantis.yaml for the full commentary on why this scans the
-        # rendered plan and why the cleanup uses a trap.
+    # The gate. See atlantis.yaml for the full reasoning on why this is in
+    # policy_check rather than plan — in short, a failed `run` step in the plan
+    # phase leaves an applyable *.tfplan on disk, and `atlantis apply` finds
+    # plans by scanning the filesystem rather than by checking plan status.
+    policy_check:
+      steps:
+        - env:
+            name: TG_TF_PATH
+            command: 'echo "${ATLANTIS_TERRAFORM_DISTRIBUTION}${ATLANTIS_TERRAFORM_VERSION}"'
+        - env:
+            name: TF_IN_AUTOMATION
+            value: "true"
+        - env:
+            name: ORCA_PROJECT_KEY
+            value: "demo-atlantis-terragrunt"
+
         - run:
             shell: bash
             shellArgs: ["-c"]
