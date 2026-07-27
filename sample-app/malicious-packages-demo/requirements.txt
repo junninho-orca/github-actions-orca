@@ -18,12 +18,13 @@
 # same records the scan matches against, not invented names.
 # ============================================================================
 
-# MAL-2023-1574 — typosquat of `aiohttp`. Part of the 2023 campaign that pushed
-# 900+ malicious packages to PyPI to hijack clipboard crypto wallet addresses.
-# All versions are malicious, so this is intentionally left unpinned.
-aaiohttp
-
 # MAL-2026-10760 — typosquat of `absl-py`. Exfiltrates host information on
 # install or import and has no other purpose. Pinned to the exact version the
 # advisory flags.
+#
+# Entries MUST be pinned. The scanner matches on an installed version, so an
+# unpinned requirement produces no INSTALLED VERSION and is never flagged. An
+# earlier revision listed `aaiohttp` (MAL-2023-1574) unpinned on the theory
+# that every version was malicious; the scan silently ignored it. Verified
+# against run 30312980361.
 abseil-py==0.1.0

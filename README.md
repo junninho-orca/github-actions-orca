@@ -102,19 +102,18 @@ The same applies more broadly: a project with no policies attached doesn't fail 
 
 Malicious packages are planted in a **separate manifest that nothing installs from**: [`sample-app/malicious-packages-demo/requirements.txt`](sample-app/malicious-packages-demo/requirements.txt).
 
-They are deliberately *not* in `sample-app/requirements.txt`, because `sample-app/Dockerfile` runs `pip install -r requirements.txt` during the Container Image job — one of the two planted packages exfiltrates host information at install time, so that would execute it on the runner. Three things keep it inert:
+They are deliberately *not* in `sample-app/requirements.txt`, because `sample-app/Dockerfile` runs `pip install -r requirements.txt` during the Container Image job — the planted package exfiltrates host information at install time, so that would execute it on the runner. Three things keep it inert:
 
 1. The Dockerfile copies `requirements.txt` and `src/` only; the demo directory is never copied.
 2. `sample-app/.dockerignore` excludes the demo directory from the build context, so a future `COPY . .` can't pull it in either.
-3. Both packages were removed from PyPI, so `pip` can't resolve them today — a backstop, not the mechanism.
+3. The package was removed from PyPI, so `pip` can't resolve it today — a backstop, not the mechanism.
 
 The scan still sees it: the SCA job scans `path: .` recursively and the file is named `requirements.txt`, so pip's analyzer picks it up with no `file_patterns` configuration needed.
 
-Both entries are real records in OSV.dev — the primary upstream feed for Orca's knowledge base — so you can verify them without a tenant:
+The entry is a real record in OSV.dev — the primary upstream feed for Orca's knowledge base — so you can verify it without a tenant:
 
 | Package | Advisory | What it is |
 |---|---|---|
-| `aaiohttp` | [MAL-2023-1574](https://osv.dev/vulnerability/MAL-2023-1574) | Typosquat of `aiohttp`, from the 2023 campaign that pushed 900+ packages to PyPI to hijack clipboard crypto wallet addresses |
 | `abseil-py==0.1.0` | [MAL-2026-10760](https://osv.dev/vulnerability/MAL-2026-10760) | Typosquat of `absl-py`; exfiltrates host information on install or import |
 
 See [`sample-app/malicious-packages-demo/README.md`](sample-app/malicious-packages-demo/README.md) for the full walkthrough.
@@ -173,7 +172,7 @@ The `sample-app/` directory is designed to produce findings across every categor
 | IaC | `terraform/main.tf` | Security group `0.0.0.0/0` on port 22 |
 | IaC | `terraform/main.tf` | RDS publicly accessible, unencrypted at rest |
 | Image | `Dockerfile` | Outdated base image, runs as root |
-| Malicious packages | `malicious-packages-demo/requirements.txt` | `aaiohttp`, `abseil-py==0.1.0` — separate manifest, never installed |
+| Malicious packages | `malicious-packages-demo/requirements.txt` | `abseil-py==0.1.0` — separate manifest, never installed |
 
 Push this as a PR. You should see the five checks run, a handful of annotations appear inline on the diff, and the `Orca Gate` check fail. Flip any one finding (for example, pin `Jinja2>=3.1.4`) and re-push — the corresponding annotation clears and the gate shrinks toward green.
 
