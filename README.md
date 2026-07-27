@@ -21,7 +21,7 @@ This repo also ships a small `sample-app/` with intentional issues so the pipeli
    - Orca UI: **AppSec → Management → Projects → New**
    - Pick a stable key like `demo-shiftleft-project`. This value is safe to commit
 4. **Policy** in Orca configured to fail on High + Critical (more on this under *Gating model* below)
-5. **Malicious Packages policy attached to the project** — the scan detects malicious packages out of the box, but enforcement is policy-side (see *Malicious packages* below)
+5. **Malicious Packages policy attached to the project** — this is a hard prerequisite, not a tuning step. Without it the SCA scan refuses to run at all (see *Malicious packages* below)
 
 ## Setup
 
@@ -79,7 +79,14 @@ The gate blocks on any result that is not a clean success — `failure`, `cancel
 
 Malicious package detection rides along with the SCA scan. The workflow passes `security_checks: vulns,license,malicious` explicitly so the intent is visible in review, though `malicious` is also the action default.
 
-Detection is only half of it — **enforcement is policy-side**, and the project must be attached to the built-in policy:
+**Attaching the policy is a hard prerequisite, not a tuning step.** Enabling `malicious` without one doesn't silently skip the check — the scan aborts with:
+
+```text
+Error: in order to perform 'malicious' scan, a security policy should be
+attached to '<your-project-key>' project
+```
+
+That's exit code 1, so no SARIF is written and the vulnerability and license results are lost along with it. Attach the policy first:
 
 ```text
 AppSec → Management → Policies → Code Security
@@ -87,7 +94,9 @@ AppSec → Management → Policies → Code Security
   → ⋯ → Attach to Projects → [select your project] → Select
 ```
 
-Enforcement modes: **Block** (default — fails the CI build and blocks the PR) or **Warn** (logs findings, doesn't block). Findings carry the `shiftleft:malicious_packages` label, so you can filter for them on the main alerts page.
+Once attached, enforcement modes are **Block** (default — fails the CI build and blocks the PR) or **Warn** (logs findings, doesn't block). Findings carry the `shiftleft:malicious_packages` label, so you can filter for them on the main alerts page.
+
+The same applies more broadly: a project with no policies attached doesn't fail loudly, it reports clean. IaC and Secrets scans will run, print `Based on your defined policies, no controls to warn about`, and exit `0` with `[TOTAL: 0]` against planted findings. Container image scans are the exception — they evaluate against the built-in Container Image policies regardless. If scans come back green on a repo you know is dirty, check the project's attached policies before anything else.
 
 ### The demo manifest
 
@@ -212,11 +221,17 @@ The workflow expects `sample-app/Dockerfile`. Point `working-directory` at your 
 **SARIF upload fails**
 Confirm `security-events: write` is granted on the job. Some repos inherit a more restrictive default from org settings. Note the upload steps are guarded with `hashFiles(...) != ''`, so a scan that errored out before writing SARIF skips the upload rather than failing it with a misleading "path does not exist" — check the scan step's log for the real error.
 
-**Orca Gate passes but you expected it to fail**
-Check the policy in the Orca UI. Gate follows policy decision, not raw finding count. For malicious packages specifically, confirm the project is attached to the built-in policy and that it's set to *Block*, not *Warn*.
+**Scans report `[TOTAL: 0]` and pass on a repo you know is dirty**
+Almost always no policies attached to the project. Look for `Based on your defined policies, no controls to warn about` in the job log — the scan found your code, then had nothing to evaluate it against. Fix it at **AppSec → Management → Policies**, not in the YAML.
 
-**Malicious packages aren't being flagged**
-Detection needs `malicious` in `security_checks` (it's there) *and* the project attached to **Orca Built-in - Malicious Packages Policy**. Filter alerts by the `shiftleft:malicious_packages` label to confirm the scan is reporting them.
+**Orca Gate passes but you expected it to fail**
+Same first check as above, then confirm the relevant policy is set to *Block*, not *Warn*. Gate follows policy decision, not raw finding count.
+
+**`Error: --console-output contains an invalid value 'table'`**
+Allowed values differ per scanner. SAST accepts `[cli,glsast,json,sarif]` and rejects `table`; IaC, Secrets, and Container Image all accept `table`. The scan aborts before writing SARIF, so the guarded upload step skips and the job fails with no findings — check the scan step, not the upload step.
+
+**SCA fails with `a security policy should be attached to '<project>' project`**
+`malicious` in `security_checks` requires an attached policy. See *Malicious packages* above — this takes the vulnerability and license results down with it, so it's worth fixing rather than working around.
 
 ## References
 

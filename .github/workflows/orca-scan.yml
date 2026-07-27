@@ -74,7 +74,9 @@ jobs:
           format: sarif
           output: orca-sast-results/
           # Without this the action writes files only and the job log is bare.
-          console_output: table
+          # SAST accepts [cli,glsast,json,sarif] here — unlike the other
+          # scanners it rejects `table` outright and aborts before scanning.
+          console_output: cli
 
       - name: Upload SAST SARIF
         if: always() && hashFiles('orca-sast-results/sast.sarif') != ''
