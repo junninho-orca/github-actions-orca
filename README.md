@@ -9,6 +9,7 @@ This repo also ships a small `sample-app/` with intentional issues so the pipeli
 - `.github/workflows/orca-scan.yml` — one workflow, five scan jobs, a final required gate
 - `sample-app/` — Python + Terraform + Dockerfile with planted issues across every scan type, plus a scanned-but-never-installed manifest for malicious packages
 - `.gitignore` — keeps Terraform state and SARIF artifacts out of commits
+- `examples/atlantis-terragrunt/` — the same IaC gate for customers who run Atlantis with Terragrunt instead of GitHub Actions
 
 ## Prerequisites
 
@@ -175,6 +176,13 @@ The `sample-app/` directory is designed to produce findings across every categor
 | Malicious packages | `malicious-packages-demo/requirements.txt` | `abseil-py==0.1.0` — separate manifest, never installed |
 
 Push this as a PR. You should see the five checks run, a handful of annotations appear inline on the diff, and the `Orca Gate` check fail. Flip any one finding (for example, pin `Jinja2>=3.1.4`) and re-push — the corresponding annotation clears and the gate shrinks toward green.
+
+## Other CI systems
+
+[`examples/atlantis-terragrunt/`](examples/atlantis-terragrunt/) covers Atlantis with Terragrunt. Two things differ from this workflow beyond the CI system:
+
+- **What gets scanned.** A `terragrunt.hcl` holds a module reference and a set of inputs, not resources, so scanning source files misses misconfigurations that only exist once Terragrunt merges the two. That example scans the rendered plan JSON instead.
+- **Where the gate sits.** Here, the gate is the merge — branch protection blocks a PR until `Orca Gate` passes. In Atlantis, `atlantis apply` runs *before* the merge, so merge-time gating is too late to stop a deploy. That example uses Atlantis's `policy_check` phase and the non-overridable `policies_passed` apply requirement instead.
 
 ## Customizing for a customer
 
