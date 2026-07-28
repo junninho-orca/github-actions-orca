@@ -54,7 +54,7 @@ projects:
         - "*.hcl"
         - "../env.hcl"
         - "../../account.hcl"
-        - "../../../terragrunt.hcl"
+        - "../../../root.hcl"
         - "../../../modules/s3-bucket/**/*.tf"
     apply_requirements: [approved, mergeable]
 
@@ -68,7 +68,7 @@ projects:
         - "*.hcl"
         - "../env.hcl"
         - "../../account.hcl"
-        - "../../../terragrunt.hcl"
+        - "../../../root.hcl"
         - "../../../modules/s3-bucket/**/*.tf"
     apply_requirements: [approved, mergeable]
 
@@ -81,7 +81,7 @@ projects:
         - "*.hcl"
         - "../env.hcl"
         - "../../account.hcl"
-        - "../../../terragrunt.hcl"
+        - "../../../root.hcl"
         - "../../../modules/rds/**/*.tf"
     apply_requirements: [approved, mergeable]
 

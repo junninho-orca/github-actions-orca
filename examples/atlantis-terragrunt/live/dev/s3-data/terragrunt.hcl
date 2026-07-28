@@ -2,7 +2,7 @@
 # `atlantis plan` here should pass the Orca gate.
 
 include "root" {
-  path = find_in_parent_folders()
+  path = find_in_parent_folders("root.hcl")
 }
 
 terraform {

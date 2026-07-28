@@ -1,8 +1,8 @@
 # Orca IaC scanning in Atlantis + Terragrunt
 
-An Atlantis setup that runs an Orca IaC scan on every `plan` and blocks `apply` when the scan fails policy.
+An Atlantis setup that runs an Orca IaC scan in the `policy_check` phase and blocks `apply` when the scan fails policy.
 
-There is no Orca-documented Atlantis integration, so this is built from the documented primitives on both sides: Atlantis custom workflows, and Orca's support for Terraform plan JSON as a first-class IaC platform.
+There is no Orca-documented Atlantis integration, so this is built from the documented primitives on both sides: Atlantis policy checks, and Orca's support for Terraform plan JSON as a first-class IaC platform.
 
 ## The core idea
 
@@ -29,7 +29,7 @@ Orca parses the plan's `planned_values` and evaluates them as Terraform, with fi
 | [`server-config/repos.yaml`](server-config/repos.yaml) | The same workflow defined server-side, plus policy owners. **Use this to actually enforce.** |
 | [`server-config/policies/`](server-config/policies/orca-iac-placeholder/README.md) | A placeholder policy set that exists only to satisfy Atlantis config validation. Conftest never runs. |
 | [`Dockerfile`](Dockerfile) | Atlantis image with `terragrunt` and `orca-cli` on PATH. |
-| [`terragrunt.hcl`](terragrunt.hcl) | Root config: provider and state generation. |
+| [`root.hcl`](root.hcl) | Root Terragrunt config: provider and state generation. Named `root.hcl`, not `terragrunt.hcl` — see *Scaling past a demo*. |
 | `live/dev/s3-data/` | Control case — takes the module's secure defaults, passes the gate. |
 | `live/prod/s3-data/` | Public + unencrypted bucket, entirely via inputs. Fails the gate. |
 | `live/prod/rds/` | Internet-facing unencrypted database, open CIDR, literal password. Fails the gate. |
@@ -139,13 +139,31 @@ Note that `policies_passed` and `allow_custom_workflows: false` defend different
 
 ## Demo mode: no cloud credentials
 
-[`terragrunt.hcl`](terragrunt.hcl) generates a provider with static dummy credentials and `skip_credentials_validation` / `skip_metadata_api_check` / `skip_requesting_account_id`, plus a `local` state backend. That renders a complete, scannable plan with no AWS access at all, which makes this demoable without asking anyone for cloud credentials.
+[`root.hcl`](root.hcl) generates a provider with static dummy credentials and `skip_credentials_validation` / `skip_metadata_api_check` / `skip_requesting_account_id`, plus a `local` state backend. That renders a complete, scannable plan with no AWS access at all, which makes this demoable without asking anyone for cloud credentials.
 
 Both are marked in the file. Remove the skips and swap the commented S3 backend in when you point this at a real account.
+
+### Verified locally
+
+All three units were run end to end with Terragrunt 1.1.1 and Terraform 1.14.8, with no AWS credentials:
+
+| Check | Result |
+|---|---|
+| `init` + `plan` + `show -json` on all three units | Renders a complete plan, no cloud access |
+| `live/prod/s3-data` plan JSON | `acl = public-read`, all four public-access-block flags `false`, no encryption resource at all (`count = 0`) |
+| `live/prod/rds` plan JSON | `publicly_accessible = true`, `storage_encrypted = false`, `backup_retention_period = 0`, ingress `0.0.0.0/0` |
+| `live/dev/s3-data` plan JSON | Encryption present, versioning enabled, `BucketOwnerEnforced`, no ACL resource |
+| Scan step control flow | Exit 3 propagates through the `trap`; `orca-plan.json` removed on both the pass and fail paths |
+
+What is still unverified is `orca-cli` itself and the Atlantis half — the scanner needs a tenant, and `policies_passed` needs a running server.
+
+One thing this exercise turned up, worth knowing if you adapt the workflow: **use the absolute `$PLANFILE` for both `plan -out` and `show -json`.** A relative filename resolves against Terraform's working directory, which under Terragrunt is inside `.terragrunt-cache/<hash>/<hash>/<module>/` — so the plan lands somewhere surprising and a later `show` against the project directory won't find it. Atlantis sets `$PLANFILE` to an absolute path, which is why the workflow as written works.
 
 ## Scaling past a demo
 
 Three things in here are sized for a three-unit example and will not hold at customer scale.
+
+**The root config is named `root.hcl`, not `terragrunt.hcl`.** Terragrunt warns that using `terragrunt.hcl` as the root of a configuration tree is an anti-pattern and will become an error in a future version — verified against Terragrunt 1.1.1, which emits that warning on every `init`. Child units include it with `find_in_parent_folders("root.hcl")`. If you are copying this into an older tree that still uses `terragrunt.hcl` at the root, rename it while you are here.
 
 **Hand-maintained `projects:`.** The community standard for Terragrunt repos is generating `atlantis.yaml` with [`terragrunt-atlantis-config`](https://github.com/transcend-io/terragrunt-atlantis-config), which walks the Terragrunt dependency graph to emit projects and `when_modified` automatically. Adopt it and treat the `projects:` block here as illustrative — keep the `workflows:` block, since that is the part carrying the Orca gate. The generated file still needs the server-side config to be authoritative.
 
