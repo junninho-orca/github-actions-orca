@@ -10,6 +10,9 @@ venv/
 *.tfstate
 *.tfstate.backup
 *.sarif
+# The actions also drop a .json alongside each .sarif in these directories.
+orca-*-results/
+
 # Terragrunt / Atlantis plan artifacts. orca-plan.json is a rendered plan and
 # can contain sensitive input values in plaintext — never commit one.
 .terragrunt-cache/

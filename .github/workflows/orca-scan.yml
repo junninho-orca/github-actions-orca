@@ -1,13 +1,26 @@
 name: Orca Security Shift-Left
 
 # Shift-left security scans for every PR and every push to main.
-# Covers: SAST, SCA, IaC, Secrets, and the built container image.
+# Covers: SAST, SCA (vulns + licenses + malicious packages), IaC, Secrets,
+# and the built container image.
 #
 # Gating model:
 #   The "fail on High/Critical" gate is enforced by Orca's server-side policy,
 #   not by ad-hoc CLI flags. Configure your project policy in Orca to fail on
-#   High+Critical. The dedicated actions and the CLI exit with code 3 when a
-#   policy decision is "fail", which naturally fails the job.
+#   High+Critical. Each action exits with code 3 when a policy decision is
+#   "fail", which fails the job; `orca-gate` rolls the five jobs up into one
+#   required check.
+#
+# Malicious packages:
+#   Detection is part of the SCA scan (security_checks includes `malicious`),
+#   but enforcement requires the project to be attached to the built-in policy
+#   in Orca: AppSec -> Management -> Policies -> Code Security ->
+#   "Orca Built-in - Malicious Packages Policy" -> Attach to Projects.
+#
+# Fork PRs:
+#   Repository secrets are not exposed to `pull_request` runs from forks, so
+#   every scan job will fail with "api_token must be provided" and the gate
+#   will block the PR. See the README for the options.
 
 on:
   pull_request:
@@ -15,19 +28,15 @@ on:
   push:
     branches: [main]
 
-# Cancel older runs of the same ref to keep PR feedback snappy.
 concurrency:
   group: orca-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Cancel superseded PR runs to keep feedback snappy, but let every push to
+  # main run to completion — main is the record of what actually shipped.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# Least privilege by default; each scan job adds only what it needs.
 permissions:
   contents: read
-  # Needed so we can upload SARIF to GitHub code scanning.
-  security-events: write
-  # Needed so the PR gets a check annotation with findings.
-  pull-requests: read
-  # Needed by CodeQL upload-sarif to read workflow run metadata.
-  actions: read
 
 env:
   # Project key correlates this repo to an Orca AppSec project. Create it in
@@ -44,6 +53,13 @@ jobs:
   sast:
     name: SAST
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      # Needed to upload SARIF to GitHub code scanning.
+      security-events: write
+      # Needed by upload-sarif to read workflow run metadata on private repos.
+      actions: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -57,38 +73,55 @@ jobs:
           # SARIF lets GitHub render findings in the Security tab.
           format: sarif
           output: orca-sast-results/
+          # Without this the action writes files only and the job log is bare.
+          # SAST accepts [cli,glsast,json,sarif] here — unlike the other
+          # scanners it rejects `table` outright and aborts before scanning.
+          console_output: cli
 
       - name: Upload SAST SARIF
-        if: always() && hashFiles('orca-sast-results/*.sarif') != ''
+        if: always() && hashFiles('orca-sast-results/sast.sarif') != ''
         uses: github/codeql-action/upload-sarif@v4
         with:
-          sarif_file: orca-sast-results/
+          sarif_file: orca-sast-results/sast.sarif
           category: orca-sast
 
   # -------------------------------------------------------------------
-  # SCA: dependency vulns and license issues.
+  # SCA: dependency vulns, license issues, and malicious packages.
   # -------------------------------------------------------------------
   sca:
     name: SCA
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Orca SCA scan
-        uses: orcasecurity/shiftleft-fs-action@v1
+        # shiftleft-sca-action replaces shiftleft-fs-action, which is
+        # deprecated: `orca-cli fs` stops working after 2026-07-15.
+        uses: orcasecurity/shiftleft-sca-action@v1
         with:
           api_token: ${{ secrets.ORCA_SECURITY_API_TOKEN }}
           project_key: ${{ env.ORCA_PROJECT_KEY }}
           path: .
+          # `malicious` turns on malicious package detection. This matches the
+          # action default; it is spelled out so the intent is reviewable.
+          # Secret detection is deliberately absent here — the dedicated
+          # `secrets` job below owns that, so findings are not double-reported.
+          security_checks: vulns,license,malicious
           format: sarif
           output: orca-sca-results/
+          console_output: table
 
       - name: Upload SCA SARIF
-        if: always() && hashFiles('orca-sca-results/*.sarif') != ''
+        if: always() && hashFiles('orca-sca-results/sca.sarif') != ''
         uses: github/codeql-action/upload-sarif@v4
         with:
-          sarif_file: orca-sca-results/
+          sarif_file: orca-sca-results/sca.sarif
           category: orca-sca
 
   # -------------------------------------------------------------------
@@ -97,6 +130,11 @@ jobs:
   iac:
     name: IaC
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -109,20 +147,26 @@ jobs:
           path: .
           format: sarif
           output: orca-iac-results/
+          console_output: table
 
       - name: Upload IaC SARIF
-        if: always() && hashFiles('orca-iac-results/*.sarif') != ''
+        if: always() && hashFiles('orca-iac-results/iac.sarif') != ''
         uses: github/codeql-action/upload-sarif@v4
         with:
-          sarif_file: orca-iac-results/
+          sarif_file: orca-iac-results/iac.sarif
           category: orca-iac
 
   # -------------------------------------------------------------------
-  # Secrets: hardcoded tokens, keys, credentials.
+  # Secrets: hardcoded tokens, keys, credentials — across git history.
   # -------------------------------------------------------------------
   secrets:
     name: Secrets
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -136,23 +180,34 @@ jobs:
           api_token: ${{ secrets.ORCA_SECURITY_API_TOKEN }}
           project_key: ${{ env.ORCA_PROJECT_KEY }}
           path: .
+          # fetch-depth: 0 only makes history *available*. In CI the scan is
+          # baselined to the event's commits (PR commits / pushed commits)
+          # unless the baseline is explicitly ignored. Drop this if scan time
+          # on a large repo matters more than catching rotated keys.
+          ignore_git_history_baseline: "true"
           format: sarif
           output: orca-secrets-results/
+          console_output: table
 
       - name: Upload Secrets SARIF
-        if: always() && hashFiles('orca-secrets-results/*.sarif') != ''
+        if: always() && hashFiles('orca-secrets-results/secrets.sarif') != ''
         uses: github/codeql-action/upload-sarif@v4
         with:
-          sarif_file: orca-secrets-results/
+          sarif_file: orca-secrets-results/secrets.sarif
           category: orca-secrets
 
   # -------------------------------------------------------------------
-  # Container image: build then scan for OS + lang vulns, secrets-in-layers, misconfigs.
-  # Dedicated action does not exist for image scan, so we use orca-cli directly.
+  # Container image: build then scan for OS + lang vulns, secrets baked into
+  # layers, and image misconfigs.
   # -------------------------------------------------------------------
   image:
     name: Container Image
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -161,27 +216,21 @@ jobs:
         working-directory: sample-app
         run: docker build -t "$IMAGE_NAME:$IMAGE_TAG" .
 
-      - name: Install orca-cli
-        run: |
-          set -euo pipefail
-          curl -sfL 'https://raw.githubusercontent.com/orcasecurity/orca-cli/main/install.sh' \
-            | bash -s -- -b /usr/local/bin
-          orca-cli --version
-
-      - name: Scan image
-        env:
-          ORCA_SECURITY_API_TOKEN: ${{ secrets.ORCA_SECURITY_API_TOKEN }}
-        run: |
-          orca-cli --project-key "$ORCA_PROJECT_KEY" image scan \
-            "$IMAGE_NAME:$IMAGE_TAG" \
-            --format sarif \
-            --output orca-image.sarif
+      - name: Orca container image scan
+        uses: orcasecurity/shiftleft-container-image-action@v1
+        with:
+          api_token: ${{ secrets.ORCA_SECURITY_API_TOKEN }}
+          project_key: ${{ env.ORCA_PROJECT_KEY }}
+          image: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          format: sarif
+          output: orca-image-results/
+          console_output: table
 
       - name: Upload Image SARIF
-        if: always()
+        if: always() && hashFiles('orca-image-results/image.sarif') != ''
         uses: github/codeql-action/upload-sarif@v4
         with:
-          sarif_file: orca-image.sarif
+          sarif_file: orca-image-results/image.sarif
           category: orca-image
 
   # -------------------------------------------------------------------
@@ -190,14 +239,23 @@ jobs:
   orca-gate:
     name: Orca Gate
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     needs: [sast, sca, iac, secrets, image]
     if: always()
+    permissions: {}
     steps:
-      - name: Evaluate
+      # Treat anything that is not a clean success as a block. `failure` is the
+      # policy-decision case; `cancelled` and `skipped` mean a scan never
+      # produced a verdict, which must not read as green on a required check.
+      - name: Block on failed or incomplete scans
+        if: >-
+          contains(needs.*.result, 'failure')
+          || contains(needs.*.result, 'cancelled')
+          || contains(needs.*.result, 'skipped')
         run: |
-          set -e
-          results='${{ toJson(needs) }}'
-          echo "Scan results: $results"
-          echo "$results" | grep -q '"result": "failure"' \
-            && { echo "::error::Orca policy decision: FAIL. See Security tab for findings."; exit 1; } \
-            || echo "Orca policy decision: PASS"
+          echo "::error::Orca gate: FAIL — a scan reported a policy violation or did not complete. See the Security tab and the individual job logs."
+          exit 1
+
+      - name: Pass
+        run: |
+          echo "Orca gate: PASS — all five scans completed within policy."
