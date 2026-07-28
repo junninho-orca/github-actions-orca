@@ -10,3 +10,5 @@ venv/
 *.tfstate
 *.tfstate.backup
 *.sarif
+# The actions also drop a .json alongside each .sarif in these directories.
+orca-*-results/
